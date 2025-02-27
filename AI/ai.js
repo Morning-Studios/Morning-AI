@@ -358,3 +358,244 @@ messageForm.addEventListener('submit', (e) => {
 
 // Load saved chat history on page load
 loadSavedChatHistory();
+
+// Theme Toggling
+const themeToggler = document.getElementById('themeToggler');
+const body = document.body;
+let isDarkMode = localStorage.getItem('darkMode') === 'true';
+
+// Initialize theme
+if (isDarkMode) {
+    body.classList.add('dark-theme');
+    themeToggler.innerHTML = '<i class="bx bx-moon"></i>';
+} else {
+    themeToggler.innerHTML = '<i class="bx bx-sun"></i>';
+}
+
+themeToggler.addEventListener('click', () => {
+    isDarkMode = !isDarkMode;
+    body.classList.toggle('dark-theme');
+    themeToggler.innerHTML = isDarkMode ? '<i class="bx bx-moon"></i>' : '<i class="bx bx-sun"></i>';
+    localStorage.setItem('darkMode', isDarkMode);
+});
+
+// Chat functionality
+const chatSection = document.querySelector('.chats');
+const promptForm = document.querySelector('.prompt__form');
+const promptInput = document.querySelector('.prompt__form-input');
+const sendButton = document.getElementById('sendButton');
+const deleteButton = document.getElementById('deleteButton');
+const suggestItems = document.querySelectorAll('.suggests__item');
+
+// API configuration
+const API_URL = 'http://localhost:8000';
+let userName = localStorage.getItem('userName') || '';
+
+// Initialize Morning briefing on page load
+window.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await loadMorningBriefing();
+    } catch (error) {
+        console.error('Error loading morning briefing:', error);
+        addMessageToChat('system', 'Sorry, I couldn\'t load your morning briefing. Please check if the API server is running.');
+    }
+});
+
+// Load morning briefing
+async function loadMorningBriefing() {
+    const response = await fetch(`${API_URL}/briefing?name=${userName}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch morning briefing');
+    }
+    
+    const data = await response.json();
+    
+    // Create greeting message
+    const greeting = `
+# ${data.greeting}
+Today is ${data.date}
+
+## Weather
+🌡️ ${Math.round(data.weather.temperature)}°F - ${data.weather.condition}
+💧 Humidity: ${data.weather.humidity}%
+💨 Wind: ${data.weather.wind_speed.toFixed(1)} mph
+
+## Today's Events
+${data.events.map(event => {
+    const time = new Date(event.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    return `- **${time}**: ${event.title}${event.location ? ` at ${event.location}` : ''}`;
+}).join('\n')}
+
+## Top News
+${data.news.map(item => `- **${item.title}**: ${item.summary}`).join('\n')}
+
+## Quote of the Day
+> ${data.quote_of_the_day}
+    `;
+    
+    addMessageToChat('system', greeting);
+}
+
+// Add message to chat
+function addMessageToChat(sender, message) {
+    const messageElement = document.createElement('div');
+    messageElement.classList.add('chat');
+    messageElement.classList.add(sender === 'user' ? 'chat--user' : 'chat--ai');
+    
+    const iconName = sender === 'user' ? 'bx-user' : 'bx-bot';
+    
+    messageElement.innerHTML = `
+        <div class="chat__icon">
+            <i class='bx ${iconName}'></i>
+        </div>
+        <div class="chat__content">
+            ${sender === 'user' ? message : marked.parse(message)}
+        </div>
+    `;
+    
+    chatSection.appendChild(messageElement);
+    
+    // Apply syntax highlighting to code blocks
+    if (sender === 'system') {
+        messageElement.querySelectorAll('pre code').forEach((block) => {
+            hljs.highlightElement(block);
+        });
+    }
+    
+    // Scroll to the bottom
+    chatSection.scrollTop = chatSection.scrollHeight;
+}
+
+// Process user query
+async function processUserQuery(query) {
+    try {
+        // Add user message to chat
+        addMessageToChat('user', query);
+        
+        // Show typing indicator
+        const typingIndicator = document.createElement('div');
+        typingIndicator.classList.add('chat', 'chat--ai', 'chat--typing');
+        typingIndicator.innerHTML = `
+            <div class="chat__icon">
+                <i class='bx bx-bot'></i>
+            </div>
+            <div class="chat__content">
+                <div class="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        `;
+        chatSection.appendChild(typingIndicator);
+        chatSection.scrollTop = chatSection.scrollHeight;
+        
+        // Process the query
+        let response;
+        
+        // Check for specific commands
+        if (query.toLowerCase().includes('weather')) {
+            const weatherResponse = await fetch(`${API_URL}/weather`);
+            const weatherData = await weatherResponse.json();
+            response = `
+## Current Weather
+🌡️ ${Math.round(weatherData.temperature)}°F - ${weatherData.condition}
+💧 Humidity: ${weatherData.humidity}%
+💨 Wind: ${weatherData.wind_speed.toFixed(1)} mph
+            `;
+        } else if (query.toLowerCase().includes('news')) {
+            const newsResponse = await fetch(`${API_URL}/news`);
+            const newsData = await newsResponse.json();
+            response = `
+## Today's Top News
+${newsData.map((item, index) => `${index + 1}. **${item.title}**: ${item.summary}`).join('\n\n')}
+            `;
+        } else if (query.toLowerCase().includes('calendar') || query.toLowerCase().includes('schedule') || query.toLowerCase().includes('events')) {
+            const calendarResponse = await fetch(`${API_URL}/calendar`);
+            const calendarData = await calendarResponse.json();
+            response = `
+## Today's Events
+${calendarData.map(event => {
+    const time = new Date(event.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    return `- **${time}**: ${event.title}${event.location ? ` at ${event.location}` : ''}`;
+}).join('\n')}
+            `;
+        } else if (query.toLowerCase().includes('quote')) {
+            const quoteResponse = await fetch(`${API_URL}/quote`);
+            const quoteData = await quoteResponse.json();
+            response = `
+> ${quoteData.quote}
+            `;
+        } else if (query.toLowerCase().includes('my name is') || query.toLowerCase().includes('call me')) {
+            // Extract name
+            const nameMatch = query.match(/(?:my name is|call me) ([a-zA-Z]+)/i);
+            if (nameMatch && nameMatch[1]) {
+                userName = nameMatch[1];
+                localStorage.setItem('userName', userName);
+                response = `Nice to meet you, ${userName}! I'll remember your name for future sessions.`;
+            } else {
+                response = "I didn't catch your name. Could you please repeat it?";
+            }
+        } else if (query.toLowerCase().includes('help')) {
+            response = `
+## How to use Morning AI
+
+Here are some things you can ask me:
+- "What's the weather like today?"
+- "Show me the latest news"
+- "What's on my calendar today?"
+- "Give me an inspirational quote"
+- "My name is [your name]" to personalize your experience
+
+You can also ask me general questions, and I'll do my best to help!
+            `;
+        } else {
+            // This would be where you'd connect to a more sophisticated AI model
+            // For now, we'll just provide a simple response
+            response = `I received your query: "${query}"\n\nThis is a simple response as this demo doesn't include a full AI model. In a complete implementation, this would connect to GPT, Claude, or another AI service to process complex queries.`;
+        }
+        
+        // Remove typing indicator
+        chatSection.removeChild(typingIndicator);
+        
+        // Add AI response to chat
+        addMessageToChat('system', response);
+        
+    } catch (error) {
+        console.error('Error processing query:', error);
+        addMessageToChat('system', 'Sorry, I encountered an error while processing your request. Please try again.');
+    }
+}
+
+// Event listeners
+promptForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const query = promptInput.value.trim();
+    if (query) {
+        processUserQuery(query);
+        promptInput.value = '';
+    }
+});
+
+// Suggest items click
+suggestItems.forEach(item => {
+    item.addEventListener('click', () => {
+        const suggestText = item.querySelector('.suggests__item-text').textContent.trim();
+        promptInput.value = suggestText;
+        processUserQuery(suggestText);
+    });
+});
+
+// Delete button to clear chat
+deleteButton.addEventListener('click', () => {
+    if (confirm('Are you sure you want to clear the chat history?')) {
+        chatSection.innerHTML = '';
+        loadMorningBriefing();
+    }
+});
+
+// Make input field grow with content
+promptInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = (this.scrollHeight) + 'px';
+});
